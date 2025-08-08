@@ -1,16 +1,18 @@
--- Kaitun Autofarm Script
+-- Kaitun Autofarm Script with Webhook Integration
 -- Features:
 -- - Full-screen custom UI
 -- - Performance tracking (gems/trophies per hour)
 -- - Enhanced auto-battle system
 -- - Custom deployment logic
 -- - Real-time stats monitoring
+-- - Discord webhook notifications
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local CONFIG = {
@@ -20,7 +22,9 @@ local CONFIG = {
     HITBOX_SIZE = Vector3.new(15, 15, 15),
     UNITS = {"Pekka", "Wizard", "Giant", "Archer"},
     TEAM = "Blue",
-    MIN_ELIXIR = 7
+    MIN_ELIXIR = 7,
+    WEBHOOK_URL = "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE", -- Replace with your webhook URL
+    WEBHOOK_INTERVAL = 300 -- Send webhook every 5 minutes (300 seconds)
 }
 
 -- State management
@@ -30,12 +34,129 @@ local STATE = {
     StartStats = {Gems = 0, Trophies = 0},
     CurrentStats = {Gems = 0, Trophies = 0},
     StartTime = 0,
+    LastWebhookTime = 0,
     Performance = {
         GemsPerHour = 0,
         TrophiesPerHour = 0,
         BattlesPerHour = 0
     }
 }
+
+-- Webhook functions
+local function sendWebhook(data)
+    if CONFIG.WEBHOOK_URL == "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE" then
+        warn("Please set your Discord webhook URL in the CONFIG.WEBHOOK_URL field")
+        return
+    end
+    
+    local success, response = pcall(function()
+        return HttpService:PostAsync(CONFIG.WEBHOOK_URL, HttpService:JSONEncode(data), Enum.HttpContentType.ApplicationJson)
+    end)
+    
+    if not success then
+        warn("Webhook failed to send: " .. tostring(response))
+    end
+end
+
+local function createWebhookEmbed(title, description, color)
+    local player = Players.LocalPlayer
+    local currentTime = os.time()
+    local elapsedTime = currentTime - STATE.StartTime
+    
+    local embed = {
+        embeds = {{
+            title = title,
+            description = description,
+            color = color or 3447003, -- Default blue color
+            fields = {
+                {
+                    name = "👤 Player",
+                    value = player.Name,
+                    inline = true
+                },
+                {
+                    name = "🎯 Selected Troop",
+                    value = STATE.SelectedUnit,
+                    inline = true
+                },
+                {
+                    name = "💎 Current Gems",
+                    value = tostring(STATE.CurrentStats.Gems),
+                    inline = true
+                },
+                {
+                    name = "🏆 Current Trophies",
+                    value = tostring(STATE.CurrentStats.Trophies),
+                    inline = true
+                },
+                {
+                    name = "📈 Gems/Hour",
+                    value = tostring(STATE.Performance.GemsPerHour),
+                    inline = true
+                },
+                {
+                    name = "📊 Trophies/Hour",
+                    value = tostring(STATE.Performance.TrophiesPerHour),
+                    inline = true
+                },
+                {
+                    name = "⚔️ Battles/Hour",
+                    value = tostring(STATE.Performance.BattlesPerHour),
+                    inline = true
+                },
+                {
+                    name = "⏱️ Session Time",
+                    value = string.format("%02d:%02d:%02d", 
+                        math.floor(elapsedTime / 3600),
+                        math.floor((elapsedTime % 3600) / 60),
+                        math.floor(elapsedTime % 60)
+                    ),
+                    inline = true
+                },
+                {
+                    name = "📅 Timestamp",
+                    value = os.date("%Y-%m-%d %H:%M:%S"),
+                    inline = false
+                }
+            },
+            thumbnail = {
+                url = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. player.UserId .. "&width=420&height=420&format=png"
+            },
+            footer = {
+                text = "Kaitun Autofarm v2.0 • " .. game.PlaceId
+            }
+        }}
+    }
+    
+    return embed
+end
+
+local function sendStartNotification()
+    local embed = createWebhookEmbed(
+        "🚀 Autofarm Started",
+        "Kaitun Autofarm has been activated and is now running!",
+        65280 -- Green color
+    )
+    sendWebhook(embed)
+end
+
+local function sendStopNotification()
+    local embed = createWebhookEmbed(
+        "⏹️ Autofarm Stopped",
+        "Kaitun Autofarm has been deactivated.",
+        16711680 -- Red color
+    )
+    sendWebhook(embed)
+end
+
+local function sendPeriodicUpdate()
+    local embed = createWebhookEmbed(
+        "📊 Periodic Stats Update",
+        "Here are your current farming statistics:",
+        3447003 -- Blue color
+    )
+    sendWebhook(embed)
+end
 
 -- UI Creation
 local function createCustomUI()
@@ -70,7 +191,7 @@ local function createCustomUI()
     titleText.Size = UDim2.new(1, 0, 1, 0)
     titleText.Position = UDim2.new(0, 0, 0, 0)
     titleText.BackgroundTransparency = 1
-    titleText.Text = "KAITUN AUTOFARM v2.0"
+    titleText.Text = "KAITUN AUTOFARM v2.0 + WEBHOOK"
     titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
     titleText.TextScaled = true
     titleText.Font = Enum.Font.GothamBold
@@ -89,6 +210,10 @@ local function createCustomUI()
     closeButton.Parent = titleBar
 
     closeButton.MouseButton1Click:Connect(function()
+        if STATE.Running then
+            STATE.Running = false
+            sendStopNotification()
+        end
         gui:Destroy()
     end)
 
@@ -134,12 +259,15 @@ local function createCustomUI()
             toggleButton.Text = "STOP AUTOFARM"
             toggleButton.BackgroundColor3 = Color3.fromRGB(80, 50, 50)
             STATE.StartTime = os.time()
+            STATE.LastWebhookTime = os.time()
             STATE.StartStats.Gems = player.leaderstats.Gems.Value
             STATE.StartStats.Trophies = player.leaderstats.Trophies.Value
             startAutoBattle()
+            sendStartNotification()
         else
             toggleButton.Text = "START AUTOFARM"
             toggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+            sendStopNotification()
         end
     end)
 
@@ -199,6 +327,40 @@ local function createCustomUI()
             end
         end)
     end
+
+    -- Webhook settings frame
+    local webhookFrame = Instance.new("Frame")
+    webhookFrame.Name = "WebhookFrame"
+    webhookFrame.Size = UDim2.new(0.9, 0, 0.15, 0)
+    webhookFrame.Position = UDim2.new(0.05, 0, 0.6, 0)
+    webhookFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+    webhookFrame.Parent = leftPanel
+
+    local webhookLabel = Instance.new("TextLabel")
+    webhookLabel.Name = "WebhookLabel"
+    webhookLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    webhookLabel.Position = UDim2.new(0, 0, 0, 0)
+    webhookLabel.BackgroundTransparency = 1
+    webhookLabel.Text = "WEBHOOK CONTROLS:"
+    webhookLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    webhookLabel.TextScaled = true
+    webhookLabel.Font = Enum.Font.Gotham
+    webhookLabel.Parent = webhookFrame
+
+    local testWebhookButton = Instance.new("TextButton")
+    testWebhookButton.Name = "TestWebhookButton"
+    testWebhookButton.Size = UDim2.new(1, 0, 0.6, 0)
+    testWebhookButton.Position = UDim2.new(0, 0, 0.4, 0)
+    testWebhookButton.BackgroundColor3 = Color3.fromRGB(50, 70, 90)
+    testWebhookButton.Text = "TEST WEBHOOK"
+    testWebhookButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    testWebhookButton.TextScaled = true
+    testWebhookButton.Font = Enum.Font.Gotham
+    testWebhookButton.Parent = webhookFrame
+
+    testWebhookButton.MouseButton1Click:Connect(function()
+        sendPeriodicUpdate()
+    end)
 
     -- Stats display
     local statsContainer = Instance.new("Frame")
@@ -360,6 +522,12 @@ local function createCustomUI()
                     STATE.Performance.TrophiesPerHour = math.floor((STATE.CurrentStats.Trophies - STATE.StartStats.Trophies) * 3600 / elapsedTime)
                     -- Estimate battles per hour (assuming ~3 minutes per battle)
                     STATE.Performance.BattlesPerHour = math.floor(elapsedTime / 180 * 3600 / elapsedTime)
+                end
+                
+                -- Send periodic webhook updates
+                if currentTime - STATE.LastWebhookTime >= CONFIG.WEBHOOK_INTERVAL then
+                    sendPeriodicUpdate()
+                    STATE.LastWebhookTime = currentTime
                 end
                 
                 -- Update UI
