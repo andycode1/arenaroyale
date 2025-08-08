@@ -1,15 +1,16 @@
--- Kaitun Autofarm Script v3.0
--- CONFIGURATION (Edit these values as needed)
-local TROOP = "Pekka" -- Change this to "Pekka", "Wizard", "Giant", or "Archer"
-local DISCORD_WEBHOOK = "" -- Paste your Discord webhook URL here for stats reporting
-local REPORT_INTERVAL = 900 -- Report stats every 15 minutes (in seconds)
+-- Kaitun Autofarm Script
+-- Features:
+-- - Full-screen custom UI
+-- - Performance tracking (gems/trophies per hour)
+-- - Enhanced auto-battle system
+-- - Custom deployment logic
+-- - Real-time stats monitoring
 
--- Main script (don't edit below unless you know what you're doing)
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 -- Configuration
 local CONFIG = {
@@ -24,12 +25,11 @@ local CONFIG = {
 
 -- State management
 local STATE = {
-    Running = true, -- Automatically start
-    SelectedUnit = TROOP,
+    Running = false,
+    SelectedUnit = "Pekka",
     StartStats = {Gems = 0, Trophies = 0},
     CurrentStats = {Gems = 0, Trophies = 0},
-    StartTime = os.time(),
-    LastReportTime = os.time(),
+    StartTime = 0,
     Performance = {
         GemsPerHour = 0,
         TrophiesPerHour = 0,
@@ -49,8 +49,8 @@ local function createCustomUI()
     -- Main background frame
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0.4, 0, 0.5, 0)
-    mainFrame.Position = UDim2.new(0.6, 0, 0.25, 0)
+    mainFrame.Size = UDim2.new(1, 0, 1, 0)
+    mainFrame.Position = UDim2.new(0, 0, 0, 0)
     mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
     mainFrame.BackgroundTransparency = 0.2
     mainFrame.BorderSizePixel = 0
@@ -59,7 +59,7 @@ local function createCustomUI()
     -- Title bar
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
-    titleBar.Size = UDim2.new(1, 0, 0.1, 0)
+    titleBar.Size = UDim2.new(1, 0, 0.05, 0)
     titleBar.Position = UDim2.new(0, 0, 0, 0)
     titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
     titleBar.BorderSizePixel = 0
@@ -67,21 +67,20 @@ local function createCustomUI()
 
     local titleText = Instance.new("TextLabel")
     titleText.Name = "TitleText"
-    titleText.Size = UDim2.new(0.9, 0, 1, 0)
-    titleText.Position = UDim2.new(0.05, 0, 0, 0)
+    titleText.Size = UDim2.new(1, 0, 1, 0)
+    titleText.Position = UDim2.new(0, 0, 0, 0)
     titleText.BackgroundTransparency = 1
-    titleText.Text = "KAITUN AUTOFARM v3.0"
+    titleText.Text = "KAITUN AUTOFARM v2.0"
     titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
     titleText.TextScaled = true
     titleText.Font = Enum.Font.GothamBold
-    titleText.TextXAlignment = Enum.TextXAlignment.Left
     titleText.Parent = titleBar
 
     -- Close button
     local closeButton = Instance.new("TextButton")
     closeButton.Name = "CloseButton"
-    closeButton.Size = UDim2.new(0.1, 0, 1, 0)
-    closeButton.Position = UDim2.new(0.9, 0, 0, 0)
+    closeButton.Size = UDim2.new(0.05, 0, 1, 0)
+    closeButton.Position = UDim2.new(0.95, 0, 0, 0)
     closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeButton.Text = "X"
     closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -91,17 +90,124 @@ local function createCustomUI()
 
     closeButton.MouseButton1Click:Connect(function()
         gui:Destroy()
-        STATE.Running = false
     end)
+
+    -- Main content area
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Size = UDim2.new(1, 0, 0.95, 0)
+    contentFrame.Position = UDim2.new(0, 0, 0.05, 0)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+
+    -- Left panel (controls)
+    local leftPanel = Instance.new("Frame")
+    leftPanel.Name = "LeftPanel"
+    leftPanel.Size = UDim2.new(0.3, 0, 1, 0)
+    leftPanel.Position = UDim2.new(0, 0, 0, 0)
+    leftPanel.BackgroundTransparency = 1
+    leftPanel.Parent = contentFrame
+
+    -- Right panel (stats)
+    local rightPanel = Instance.new("Frame")
+    rightPanel.Name = "RightPanel"
+    rightPanel.Size = UDim2.new(0.7, 0, 1, 0)
+    rightPanel.Position = UDim2.new(0.3, 0, 0, 0)
+    rightPanel.BackgroundTransparency = 1
+    rightPanel.Parent = contentFrame
+
+    -- Toggle button
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Name = "ToggleButton"
+    toggleButton.Size = UDim2.new(0.9, 0, 0.1, 0)
+    toggleButton.Position = UDim2.new(0.05, 0, 0.05, 0)
+    toggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+    toggleButton.Text = "START AUTOFARM"
+    toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleButton.TextScaled = true
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.Parent = leftPanel
+
+    toggleButton.MouseButton1Click:Connect(function()
+        STATE.Running = not STATE.Running
+        if STATE.Running then
+            toggleButton.Text = "STOP AUTOFARM"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(80, 50, 50)
+            STATE.StartTime = os.time()
+            STATE.StartStats.Gems = player.leaderstats.Gems.Value
+            STATE.StartStats.Trophies = player.leaderstats.Trophies.Value
+            startAutoBattle()
+        else
+            toggleButton.Text = "START AUTOFARM"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+        end
+    end)
+
+    -- Team select button
+    local teamButton = Instance.new("TextButton")
+    teamButton.Name = "TeamButton"
+    teamButton.Size = UDim2.new(0.9, 0, 0.1, 0)
+    teamButton.Position = UDim2.new(0.05, 0, 0.2, 0)
+    teamButton.BackgroundColor3 = Color3.fromRGB(50, 80, 50)
+    teamButton.Text = "JOIN BLUE TEAM"
+    teamButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    teamButton.TextScaled = true
+    teamButton.Font = Enum.Font.GothamBold
+    teamButton.Parent = leftPanel
+
+    teamButton.MouseButton1Click:Connect(function()
+        ReplicatedStorage.Team:InvokeServer(CONFIG.TEAM)
+    end)
+
+    -- Unit selection dropdown
+    local unitSelectionFrame = Instance.new("Frame")
+    unitSelectionFrame.Name = "UnitSelectionFrame"
+    unitSelectionFrame.Size = UDim2.new(0.9, 0, 0.2, 0)
+    unitSelectionFrame.Position = UDim2.new(0.05, 0, 0.35, 0)
+    unitSelectionFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+    unitSelectionFrame.Parent = leftPanel
+
+    local unitSelectionLabel = Instance.new("TextLabel")
+    unitSelectionLabel.Name = "UnitSelectionLabel"
+    unitSelectionLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    unitSelectionLabel.Position = UDim2.new(0, 0, 0, 0)
+    unitSelectionLabel.BackgroundTransparency = 1
+    unitSelectionLabel.Text = "SELECT UNIT TO DEPLOY:"
+    unitSelectionLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    unitSelectionLabel.TextScaled = true
+    unitSelectionLabel.Font = Enum.Font.Gotham
+    unitSelectionLabel.Parent = unitSelectionFrame
+
+    for i, unit in ipairs(CONFIG.UNITS) do
+        local unitButton = Instance.new("TextButton")
+        unitButton.Name = unit .. "Button"
+        unitButton.Size = UDim2.new(1, 0, 0.7/#CONFIG.UNITS, 0)
+        unitButton.Position = UDim2.new(0, 0, 0.3 + (i-1)*(0.7/#CONFIG.UNITS), 0)
+        unitButton.BackgroundColor3 = unit == STATE.SelectedUnit and Color3.fromRGB(80, 80, 120) or Color3.fromRGB(50, 50, 70)
+        unitButton.Text = unit:upper()
+        unitButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        unitButton.TextScaled = true
+        unitButton.Font = Enum.Font.Gotham
+        unitButton.Parent = unitSelectionFrame
+        
+        unitButton.MouseButton1Click:Connect(function()
+            STATE.SelectedUnit = unit
+            for _, btn in ipairs(unitSelectionFrame:GetChildren()) do
+                if btn:IsA("TextButton") then
+                    btn.BackgroundColor3 = btn.Name == unit.."Button" and Color3.fromRGB(80, 80, 120) or Color3.fromRGB(50, 50, 70)
+                end
+            end
+        end)
+    end
 
     -- Stats display
     local statsContainer = Instance.new("Frame")
     statsContainer.Name = "StatsContainer"
     statsContainer.Size = UDim2.new(0.95, 0, 0.9, 0)
-    statsContainer.Position = UDim2.new(0.025, 0, 0.1, 0)
+    statsContainer.Position = UDim2.new(0.025, 0, 0.05, 0)
     statsContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     statsContainer.BackgroundTransparency = 0.3
-    statsContainer.Parent = mainFrame
+    statsContainer.Parent = rightPanel
 
     -- Current stats
     local currentStatsLabel = Instance.new("TextLabel")
@@ -239,33 +345,30 @@ local function createCustomUI()
     end
 
     coroutine.wrap(function()
-        while gui.Parent and STATE.Running do
-            local currentTime = os.time()
-            local elapsedTime = currentTime - STATE.StartTime
-            
-            -- Update current stats
-            STATE.CurrentStats.Gems = player.leaderstats.Gems.Value
-            STATE.CurrentStats.Trophies = player.leaderstats.Trophies.Value
-            
-            -- Calculate performance metrics
-            if elapsedTime > 0 then
-                STATE.Performance.GemsPerHour = math.floor((STATE.CurrentStats.Gems - STATE.StartStats.Gems) * 3600 / elapsedTime)
-                STATE.Performance.TrophiesPerHour = math.floor((STATE.CurrentStats.Trophies - STATE.StartStats.Trophies) * 3600 / elapsedTime)
-                STATE.Performance.BattlesPerHour = math.floor(elapsedTime / 180 * 3600 / elapsedTime)
-            end
-            
-            -- Update UI
-            gemsLabel.Text = "GEMS: " .. tostring(STATE.CurrentStats.Gems)
-            trophiesLabel.Text = "TROPHIES: " .. tostring(STATE.CurrentStats.Trophies)
-            gemsPerHourLabel.Text = "GEMS/H: " .. tostring(STATE.Performance.GemsPerHour)
-            trophiesPerHourLabel.Text = "TROPHIES/H: " .. tostring(STATE.Performance.TrophiesPerHour)
-            battlesPerHourLabel.Text = "BATTLES/H: " .. tostring(STATE.Performance.BattlesPerHour)
-            sessionTimeLabel.Text = "SESSION TIME: " .. formatTime(elapsedTime)
-            
-            -- Send Discord report at intervals
-            if DISCORD_WEBHOOK ~= "" and currentTime - STATE.LastReportTime >= REPORT_INTERVAL then
-                sendDiscordReport()
-                STATE.LastReportTime = currentTime
+        while gui.Parent do
+            if STATE.Running then
+                local currentTime = os.time()
+                local elapsedTime = currentTime - STATE.StartTime
+                
+                -- Update current stats
+                STATE.CurrentStats.Gems = player.leaderstats.Gems.Value
+                STATE.CurrentStats.Trophies = player.leaderstats.Trophies.Value
+                
+                -- Calculate performance metrics
+                if elapsedTime > 0 then
+                    STATE.Performance.GemsPerHour = math.floor((STATE.CurrentStats.Gems - STATE.StartStats.Gems) * 3600 / elapsedTime)
+                    STATE.Performance.TrophiesPerHour = math.floor((STATE.CurrentStats.Trophies - STATE.StartStats.Trophies) * 3600 / elapsedTime)
+                    -- Estimate battles per hour (assuming ~3 minutes per battle)
+                    STATE.Performance.BattlesPerHour = math.floor(elapsedTime / 180 * 3600 / elapsedTime)
+                end
+                
+                -- Update UI
+                gemsLabel.Text = "GEMS: " .. tostring(STATE.CurrentStats.Gems)
+                trophiesLabel.Text = "TROPHIES: " .. tostring(STATE.CurrentStats.Trophies)
+                gemsPerHourLabel.Text = "GEMS/H: " .. tostring(STATE.Performance.GemsPerHour)
+                trophiesPerHourLabel.Text = "TROPHIES/H: " .. tostring(STATE.Performance.TrophiesPerHour)
+                battlesPerHourLabel.Text = "BATTLES/H: " .. tostring(STATE.Performance.BattlesPerHour)
+                sessionTimeLabel.Text = "SESSION TIME: " .. formatTime(elapsedTime)
             end
             
             task.wait(1)
@@ -273,79 +376,6 @@ local function createCustomUI()
     end)()
 
     return gui
-end
-
--- Discord reporting function
-local function sendDiscordReport()
-    if DISCORD_WEBHOOK == "" then return end
-    
-    local elapsedTime = os.time() - STATE.StartTime
-    local formattedTime = string.format("%02d:%02d:%02d", 
-        math.floor(elapsedTime / 3600),
-        math.floor((elapsedTime % 3600) / 60),
-        math.floor(elapsedTime % 60)
-    
-    local embed = {
-        {
-            ["title"] = "📊 Kaitun Autofarm Stats Report",
-            ["description"] = "Current farming session statistics",
-            ["color"] = 10181046, -- Purple color
-            ["fields"] = {
-                {
-                    ["name"] = "⏱ Session Duration",
-                    ["value"] = formattedTime,
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "💎 Current Gems",
-                    ["value"] = tostring(STATE.CurrentStats.Gems),
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "🏆 Current Trophies",
-                    ["value"] = tostring(STATE.CurrentStats.Trophies),
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "⚡ Gems/Hour",
-                    ["value"] = tostring(STATE.Performance.GemsPerHour),
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "⚡ Trophies/Hour",
-                    ["value"] = tostring(STATE.Performance.TrophiesPerHour),
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "⚡ Battles/Hour",
-                    ["value"] = tostring(STATE.Performance.BattlesPerHour),
-                    ["inline"] = true
-                },
-                {
-                    ["name"] = "🛡 Selected Troop",
-                    ["value"] = STATE.SelectedUnit,
-                    ["inline"] = true
-                }
-            },
-            ["footer"] = {
-                ["text"] = "Kaitun Autofarm v3.0 | " .. os.date("%Y-%m-%d %H:%M:%S")
-            }
-        }
-    }
-    
-    local data = {
-        ["embeds"] = embed,
-        ["username"] = "Kaitun Autofarm",
-        ["avatar_url"] = "https://i.imgur.com/J7l1tO7.png"
-    }
-    
-    local success, err = pcall(function()
-        HttpService:PostAsync(DISCORD_WEBHOOK, HttpService:JSONEncode(data))
-    end)
-    
-    if not success then
-        warn("Failed to send Discord report: " .. tostring(err))
-    end
 end
 
 -- Game functions
@@ -424,25 +454,13 @@ local function deploymentRoutine()
 end
 
 function startAutoBattle()
-    -- Initialize start stats
-    STATE.StartStats.Gems = Players.LocalPlayer.leaderstats.Gems.Value
-    STATE.StartStats.Trophies = Players.LocalPlayer.leaderstats.Trophies.Value
-    
     -- Join team if not already
     ReplicatedStorage.Team:InvokeServer(CONFIG.TEAM)
     
     -- Start routines
     attackRoutine()
     task.spawn(deploymentRoutine)
-    
-    -- Create UI
-    createCustomUI()
-    
-    -- Initial Discord report
-    if DISCORD_WEBHOOK ~= "" then
-        sendDiscordReport()
-    end
 end
 
--- Automatically start the autofarm
-startAutoBattle()
+-- Initialize
+createCustomUI()
